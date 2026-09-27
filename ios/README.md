@@ -85,9 +85,16 @@ Si le bundle `com.leorinaldi.pose` entre en conflit, change-le dans `project.yml
 
 ## Choix d'implémentation
 
-- **Portrait verrouillé, cadre 3:4 en `resizeAspect`.** Ce qui est à l'écran est
-  exactement ce que le capteur enregistre. Pas de rognage surprise entre le cadrage
-  et le fichier final. Pour du paysage, l'app Appareil photo d'Apple fait très bien l'affaire.
+- **Formats 4:5 / 3:4 / 1:1 / 9:16, aperçu en `resizeAspectFill`.** La photo est recadrée
+  au centre avec le même rapport : ce qui est cadré est ce qui est gardé. En 3:4 (capteur
+  entier), le fichier d'origine est conservé intact, HDR compris ; les autres formats sont
+  ré-encodés en HEIC avec leurs métadonnées. Portrait verrouillé.
+- **Pellicule interne** (`Documents/shots`) : les photos survivent à la fermeture de l'app,
+  « Tout enregistrer » les écrit directement dans Photos (droit *ajout seulement*).
+  Option « Enregistrer direct dans Photos » dans le menu `…`.
+- **Pack de 8 poses** dessinées en `Shape` vectoriel, mêmes squelettes que la PWA.
+- **Retardateur + rafale** combinables, anneau de décompte, second appui = annuler.
+- **Niveau** via CoreMotion, avec un retour haptique quand l'horizon est droit.
 - **Caméra virtuelle** (`builtInTripleCamera` si dispo) plutôt que trois objectifs
   séparés : le passage 0,5× / 1× / 2× / 5× se fait par simple facteur de zoom, et iOS
   gère la bascule optique.
@@ -107,10 +114,18 @@ ios/
   project.yml                 définition XcodeGen (pas de .xcodeproj versionné)
   Sources/
     PoseApp.swift             point d'entrée
-    ContentView.swift         interface, gestes sur le calque
-    CameraModel.swift         session AVFoundation, zoom, capture, photothèque
+    ContentView.swift         écran principal, gestes sur le calque
+    PoseSheet.swift           tiroir des poses
+    ViewerView.swift          pellicule plein écran
+    Controls.swift            déclencheur, vignette, niveau, grille, cartes
+    Theme.swift               couleurs, courbes, haptique, boutons
+    CameraModel.swift         session AVFoundation, zoom, retardateur, rafale
     CameraPreview.swift       couche d'aperçu UIKit
+    PhotoProcessor.swift      recadrage au format, HEIC, vignettes
+    ShotStore.swift           pellicule, export vers Photos
     OverlayStore.swift        bibliothèque de poses, contours, persistance
+    PosePack.swift            les 8 poses intégrées
+    LevelModel.swift          niveau d'horizon (CoreMotion)
     VolumeShutter.swift       déclenchement par boutons de volume
     Assets.xcassets/          icône
 ```

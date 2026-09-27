@@ -2,7 +2,8 @@ import SwiftUI
 import CoreImage
 import PhotosUI
 
-/// Une pose de référence et la transformation appliquée à son calque.
+/// Une référence importée et la transformation appliquée à son calque.
+/// Sert aussi à mémoriser la position du calque des poses intégrées.
 struct PoseItem: Identifiable, Codable, Equatable {
     var id: String
     var x: Double = 0
@@ -12,15 +13,44 @@ struct PoseItem: Identifiable, Codable, Equatable {
     var flipped: Bool = false
 }
 
-/// Bibliothèque de poses : fichiers dans Documents/poses, index en JSON.
-/// Rien ne sort de l'appareil.
+/// Identifie la pose affichée : du pack intégré ou importée.
+enum PoseKey: Hashable {
+    case builtin(String)
+    case user(String)
+
+    var raw: String {
+        switch self {
+        case .builtin(let id): return "b:" + id
+        case .user(let id): return "u:" + id
+        }
+    }
+
+    init?(raw: String) {
+        let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        switch parts[0] {
+        case "b": self = .builtin(parts[1])
+        case "u": self = .user(parts[1])
+        default: return nil
+        }
+    }
+}
+
+/// Bibliothèque de poses : fichiers dans Documents/poses. Rien ne sort de l'appareil.
 @MainActor
 final class OverlayStore: ObservableObject {
 
     @Published private(set) var items: [PoseItem] = []
-    @Published var selected: Int = -1
-    @Published var edgeMode = false { didSet { UserDefaults.standard.set(edgeMode, forKey: "edgeMode") } }
-    @Published var opacity: Double = 0.45 { didSet { UserDefaults.standard.set(opacity, forKey: "opacity") } }
+    @Published private(set) var builtinTransforms: [String: PoseItem] = [:]
+    @Published var current: PoseKey? {
+        didSet { UserDefaults.standard.set(current?.raw, forKey: "current") }
+    }
+    @Published var edgeMode = true {
+        didSet { UserDefaults.standard.set(edgeMode, forKey: "edgeMode") }
+    }
+    @Published var opacity: Double = 0.55 {
+        didSet { UserDefaults.standard.set(opacity, forKey: "opacity") }
+    }
     @Published var importing = false
 
     private let dir: URL
@@ -28,104 +58,161 @@ final class OverlayStore: ObservableObject {
     private var fullCache: [String: UIImage] = [:]
     private var thumbCache: [String: UIImage] = [:]
 
-    var current: PoseItem? {
-        guard selected >= 0, selected < items.count else { return nil }
-        return items[selected]
-    }
-
     init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         dir = docs.appendingPathComponent("poses", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        if UserDefaults.standard.object(forKey: "opacity") != nil {
-            opacity = UserDefaults.standard.double(forKey: "opacity")
-        }
-        edgeMode = UserDefaults.standard.bool(forKey: "edgeMode")
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "opacity") != nil { opacity = defaults.double(forKey: "opacity") }
+        if defaults.object(forKey: "edgeMode") != nil { edgeMode = defaults.bool(forKey: "edgeMode") }
 
         load()
-        selected = items.isEmpty ? -1 : 0
+
+        if let raw = defaults.string(forKey: "current"), let key = PoseKey(raw: raw), exists(key) {
+            current = key
+        } else {
+            current = .builtin(PosePack.all[0].id)
+        }
     }
 
-    // MARK: - Chemins
+    // MARK: - Chemins et persistance
 
     private var indexURL: URL { dir.appendingPathComponent("index.json") }
+    private var builtinURL: URL { dir.appendingPathComponent("builtin.json") }
     private func fullURL(_ id: String) -> URL { dir.appendingPathComponent("\(id).img") }
     private func edgeURL(_ id: String) -> URL { dir.appendingPathComponent("\(id).edges.png") }
 
-    // MARK: - Persistance
-
     private func load() {
-        guard let data = try? Data(contentsOf: indexURL),
-              let decoded = try? JSONDecoder().decode([PoseItem].self, from: data) else { return }
-        items = decoded.filter { FileManager.default.fileExists(atPath: fullURL($0.id).path) }
+        if let data = try? Data(contentsOf: indexURL),
+           let decoded = try? JSONDecoder().decode([PoseItem].self, from: data) {
+            items = decoded.filter { FileManager.default.fileExists(atPath: fullURL($0.id).path) }
+        }
+        if let data = try? Data(contentsOf: builtinURL),
+           let decoded = try? JSONDecoder().decode([String: PoseItem].self, from: data) {
+            builtinTransforms = decoded
+        }
     }
 
     func persist() {
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: indexURL, options: .atomic)
+        if let data = try? JSONEncoder().encode(items) { try? data.write(to: indexURL, options: .atomic) }
+        if let data = try? JSONEncoder().encode(builtinTransforms) { try? data.write(to: builtinURL, options: .atomic) }
     }
 
-    /// Modifie la pose courante sans repasser par un index.
+    private func exists(_ key: PoseKey) -> Bool {
+        switch key {
+        case .builtin(let id): return PosePack.pose(id) != nil
+        case .user(let id): return items.contains { $0.id == id }
+        }
+    }
+
+    // MARK: - Pose courante
+
+    var currentBuiltin: BuiltinPose? {
+        if case .builtin(let id)? = current { return PosePack.pose(id) }
+        return nil
+    }
+
+    var currentUser: PoseItem? {
+        if case .user(let id)? = current { return items.first { $0.id == id } }
+        return nil
+    }
+
+    var isUserPose: Bool { currentUser != nil }
+
+    var transform: PoseItem {
+        switch current {
+        case .builtin(let id)?: return builtinTransforms[id] ?? PoseItem(id: id)
+        case .user(let id)?: return items.first { $0.id == id } ?? PoseItem(id: id)
+        case .none: return PoseItem(id: "")
+        }
+    }
+
+    var currentName: String {
+        if let b = currentBuiltin { return b.name }
+        if let u = currentUser, let i = items.firstIndex(of: u) { return "Référence \(i + 1)" }
+        return "Choisir une pose"
+    }
+
+    var currentTip: String {
+        if let b = currentBuiltin { return b.tip }
+        return "Glisse pour placer, pince pour ajuster, double-tap pour recentrer."
+    }
+
     func mutate(_ change: (inout PoseItem) -> Void) {
-        guard selected >= 0, selected < items.count else { return }
-        change(&items[selected])
+        switch current {
+        case .builtin(let id)?:
+            var t = builtinTransforms[id] ?? PoseItem(id: id)
+            change(&t)
+            builtinTransforms[id] = t
+        case .user(let id)?:
+            if let i = items.firstIndex(where: { $0.id == id }) { change(&items[i]) }
+        case .none:
+            break
+        }
     }
 
     func resetTransform() {
-        mutate { item in
-            item.x = 0; item.y = 0; item.scale = 1; item.rotation = 0
+        mutate { t in
+            t.x = 0; t.y = 0; t.scale = 1; t.rotation = 0
         }
         persist()
+    }
+
+    var orderedKeys: [PoseKey] {
+        PosePack.all.map { PoseKey.builtin($0.id) } + items.map { PoseKey.user($0.id) }
+    }
+
+    /// Pose suivante (+1) ou précédente (-1), en boucle.
+    func cycle(_ direction: Int) {
+        let keys = orderedKeys
+        guard !keys.isEmpty else { return }
+        let i = current.flatMap { keys.firstIndex(of: $0) } ?? -1
+        current = keys[(i + direction + keys.count) % keys.count]
     }
 
     // MARK: - Images
 
     func image(for item: PoseItem) -> UIImage? {
-        let key = edgeMode ? item.id + ".e" : item.id
+        let wantsEdges = edgeMode && FileManager.default.fileExists(atPath: edgeURL(item.id).path)
+        let key = item.id + (wantsEdges ? ".e" : "")
         if let cached = fullCache[key] { return cached }
-        let url = edgeMode ? edgeURL(item.id) : fullURL(item.id)
-        guard let data = try? Data(contentsOf: url), let img = UIImage(data: data) else {
-            // Pas de version contours pour cette image : on retombe sur l'originale.
-            if edgeMode, let data = try? Data(contentsOf: fullURL(item.id)) {
-                return UIImage(data: data)
-            }
-            return nil
-        }
-        fullCache[key] = img
-        return img
+        guard let data = try? Data(contentsOf: wantsEdges ? edgeURL(item.id) : fullURL(item.id)),
+              let image = UIImage(data: data) else { return nil }
+        fullCache[key] = image
+        return image
     }
 
     func thumb(for item: PoseItem) -> UIImage? {
         if let cached = thumbCache[item.id] { return cached }
         guard let data = try? Data(contentsOf: fullURL(item.id)),
-              let img = UIImage(data: data) else { return nil }
-        let small = img.preparingThumbnail(of: CGSize(width: 160, height: 160)) ?? img
+              let small = PhotoProcessor.thumbnail(of: data, maxPixel: 360) else { return nil }
         thumbCache[item.id] = small
         return small
     }
 
     // MARK: - Import
 
-    func add(_ picks: [PhotosPickerItem]) async {
-        guard !picks.isEmpty else { return }
+    /// Importe des images de la photothèque et renvoie la dernière ajoutée.
+    func add(_ picks: [PhotosPickerItem]) async -> PoseKey? {
+        guard !picks.isEmpty else { return nil }
         importing = true
         defer { importing = false }
 
+        var last: PoseKey?
         for pick in picks {
             guard let data = try? await pick.loadTransferable(type: Data.self),
                   UIImage(data: data) != nil else { continue }
             let id = UUID().uuidString
-            do {
-                try data.write(to: fullURL(id), options: .atomic)
-            } catch { continue }
+            do { try data.write(to: fullURL(id), options: .atomic) } catch { continue }
             if let edges = makeEdges(from: data) {
                 try? edges.write(to: edgeURL(id), options: .atomic)
             }
             items.append(PoseItem(id: id))
+            last = .user(id)
         }
-        selected = items.isEmpty ? -1 : items.count - 1
         persist()
+        return last
     }
 
     func remove(_ item: PoseItem) {
@@ -135,30 +222,26 @@ final class OverlayStore: ObservableObject {
         fullCache[item.id + ".e"] = nil
         thumbCache[item.id] = nil
         items.removeAll { $0.id == item.id }
-        if selected >= items.count { selected = items.count - 1 }
+        if current == .user(item.id) { current = .builtin(PosePack.all[0].id) }
         persist()
     }
 
     // MARK: - Contours
 
     /// Ne garde que les lignes de la référence, en blanc sur fond transparent.
-    /// C'est le mode réellement utilisable : une photo opaque à 45 % cache la vue.
     private func makeEdges(from data: Data) -> Data? {
-        guard var image = CIImage(data: data) else { return nil }
+        guard var image = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
 
-        let extent = image.extent
-        let longest = max(extent.width, extent.height)
+        let longest = max(image.extent.width, image.extent.height)
         if longest > 1400 {
-            let ratio = 1400 / longest
             image = image.applyingFilter("CILanczosScaleTransform",
-                                         parameters: [kCIInputScaleKey: ratio,
+                                         parameters: [kCIInputScaleKey: 1400 / longest,
                                                       kCIInputAspectRatioKey: 1.0])
         }
-
-        let edges = image.applyingFilter("CIEdges", parameters: [kCIInputIntensityKey: 3.0])
-        let mono = edges.applyingFilter("CIPhotoEffectMono")
-        // Luminance -> alpha : les traits deviennent blancs, le fond disparaît.
-        let masked = mono.applyingFilter("CIMaskToAlpha")
+        let masked = image
+            .applyingFilter("CIEdges", parameters: [kCIInputIntensityKey: 3.0])
+            .applyingFilter("CIPhotoEffectMono")
+            .applyingFilter("CIMaskToAlpha")   // luminance -> alpha : traits blancs, fond transparent
 
         guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         return ciContext.pngRepresentation(of: masked, format: .RGBA8, colorSpace: space)

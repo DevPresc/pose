@@ -1,39 +1,66 @@
 import AVFoundation
-import Photos
+import AudioToolbox
 import UIKit
 
-/// Session de capture + déclenchement. Toute la configuration AVFoundation
-/// passe par `queue`; les propriétés publiées sont mises à jour sur le main.
+/// Session de capture, retardateur, rafale. Toute la configuration AVFoundation
+/// passe par `queue` ; les propriétés publiées sont mises à jour sur le main.
 final class CameraModel: NSObject, ObservableObject {
 
     @Published var isReady = false
     @Published var errorText: String?
     @Published var countdown = 0
+    @Published var countdownTotal = 0
     @Published var isBusy = false
+    /// Position dans la rafale en cours (1…burst), 0 hors rafale.
+    @Published var burstIndex = 0
     @Published var zoomOptions: [Double] = [1]
     @Published var currentZoom: Double = 1
-    @Published var flashOn = false { didSet { wantFlash = flashOn } }
+    @Published var position: AVCaptureDevice.Position = .back
 
-    /// Photo qui vient d'être prise, en attente de validation.
-    @Published var review: UIImage?
-    /// Enregistrement direct dans la photothèque, sans écran de validation.
-    @Published var autoSave = false
-    @Published var savedFlash = false
-    /// Retardateur, en secondes. Porté par le modèle pour que le déclenchement
-    /// par les boutons de volume utilise la même valeur que le bouton à l'écran.
-    @Published var timerSeconds = 0
+    @Published var flashOn = false {
+        didSet { wantFlash = flashOn }
+    }
+    @Published var autoSave = UserDefaults.standard.bool(forKey: "autoSave") {
+        didSet { UserDefaults.standard.set(autoSave, forKey: "autoSave") }
+    }
+    @Published var timerSeconds = UserDefaults.standard.integer(forKey: "timer") {
+        didSet { UserDefaults.standard.set(timerSeconds, forKey: "timer") }
+    }
+    @Published var burst = max(1, UserDefaults.standard.integer(forKey: "burst")) {
+        didSet { UserDefaults.standard.set(burst, forKey: "burst") }
+    }
+    @Published var ratio = FrameRatio(rawValue: UserDefaults.standard.string(forKey: "ratio") ?? "") ?? .r45 {
+        didSet {
+            UserDefaults.standard.set(ratio.rawValue, forKey: "ratio")
+            wantRatio = ratio.value
+        }
+    }
+
+    /// Appelé sur le main à chaque photo traitée (recadrée, encodée).
+    var onPhoto: ((PhotoProcessor.Output) -> Void)?
+    var onMessage: ((String) -> Void)?
 
     let session = AVCaptureSession()
 
     private let output = AVCapturePhotoOutput()
     private let queue = DispatchQueue(label: "pose.camera.session")
+    private let processing = DispatchQueue(label: "pose.camera.processing", qos: .userInitiated)
+    private var input: AVCaptureDeviceInput?
     private var device: AVCaptureDevice?
     private var zoomBase: CGFloat = 1
     private var wantFlash = false
-    private var photoData: Data?
+    private var wantRatio: CGFloat = FrameRatio.r45.value
+    private var wantPosition: AVCaptureDevice.Position = .back
     private var timer: Timer?
+    private var remaining = 0
+    private var cancelled = false
     private var configured = false
     private let volumeShutter = VolumeShutter()
+
+    override init() {
+        super.init()
+        wantRatio = ratio.value
+    }
 
     // MARK: - Démarrage
 
@@ -43,8 +70,7 @@ final class CameraModel: NSObject, ObservableObject {
             run()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                if granted { self?.run() }
-                else { self?.report("Accès caméra refusé.") }
+                if granted { self?.run() } else { self?.report("Accès caméra refusé.") }
             }
         default:
             report("Accès caméra refusé. Réglages → Pose → Appareil photo.")
@@ -65,32 +91,38 @@ final class CameraModel: NSObject, ObservableObject {
             guard self.configured else { return }
             if !self.session.isRunning { self.session.startRunning() }
             self.applyMaxPhotoDimensions()
-            self.setMain { self.isReady = true; self.errorText = nil }
+            self.onMain { self.isReady = true; self.errorText = nil }
         }
+    }
+
+    private static func bestDevice(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        if position == .front {
+            return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+        }
+        // Caméra virtuelle la plus riche : on change d'objectif par simple facteur de zoom.
+        let types: [AVCaptureDevice.DeviceType] = [
+            .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera,
+        ]
+        for type in types {
+            if let d = AVCaptureDevice.default(type, for: .video, position: .back) { return d }
+        }
+        return nil
     }
 
     private func configure() {
         session.beginConfiguration()
         session.sessionPreset = .photo
 
-        // Caméra virtuelle la plus riche disponible : elle permet de passer
-        // d'un objectif à l'autre par simple facteur de zoom.
-        let candidates: [AVCaptureDevice.DeviceType] = [
-            .builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera
-        ]
-        var picked: AVCaptureDevice?
-        for type in candidates {
-            if let d = AVCaptureDevice.default(type, for: .video, position: .back) { picked = d; break }
-        }
-
-        guard let dev = picked,
-              let input = try? AVCaptureDeviceInput(device: dev),
-              session.canAddInput(input) else {
+        guard let dev = Self.bestDevice(for: wantPosition),
+              let inp = try? AVCaptureDeviceInput(device: dev),
+              session.canAddInput(inp) else {
             session.commitConfiguration()
-            report("Caméra arrière indisponible.")
+            report("Caméra indisponible.")
             return
         }
-        session.addInput(input)
+        session.addInput(inp)
+        input = inp
+        device = dev
 
         guard session.canAddOutput(output) else {
             session.commitConfiguration()
@@ -101,27 +133,11 @@ final class CameraModel: NSObject, ObservableObject {
         output.maxPhotoQualityPrioritization = .quality
         session.commitConfiguration()
 
-        device = dev
         configured = true
-
-        // Sur une caméra à ultra grand-angle, le facteur 1.0 correspond au 0,5×.
-        switch dev.deviceType {
-        case .builtInTripleCamera, .builtInDualWideCamera: zoomBase = 2
-        default: zoomBase = 1
-        }
-
-        var options: [Double] = []
-        if zoomBase == 2 { options.append(0.5) }
-        options.append(1)
-        let maxUI = Double(dev.maxAvailableVideoZoomFactor) / Double(zoomBase)
-        if maxUI >= 2 { options.append(2) }
-        if maxUI >= 5 { options.append(5) }
-
-        setMain { self.zoomOptions = options; self.currentZoom = 1 }
-        applyZoom(1)
+        updateZoomOptions(for: dev)
     }
 
-    /// À appeler une fois la session lancée : `activeFormat` n'est fiable qu'à ce moment.
+    /// `activeFormat` n'est fiable qu'une fois la session lancée : c'est ce qui débloque le 48 Mpx.
     private func applyMaxPhotoDimensions() {
         guard let dev = device else { return }
         let dims = dev.activeFormat.supportedMaxPhotoDimensions
@@ -132,10 +148,52 @@ final class CameraModel: NSObject, ObservableObject {
         session.commitConfiguration()
     }
 
+    func switchCamera() {
+        guard !isBusy else { return }
+        let next: AVCaptureDevice.Position = position == .back ? .front : .back
+        position = next
+        wantPosition = next
+        queue.async { [weak self] in
+            guard let self, self.configured, let old = self.input,
+                  let dev = Self.bestDevice(for: next),
+                  let inp = try? AVCaptureDeviceInput(device: dev) else { return }
+            self.session.beginConfiguration()
+            self.session.removeInput(old)
+            if self.session.canAddInput(inp) {
+                self.session.addInput(inp)
+                self.input = inp
+                self.device = dev
+            } else {
+                self.session.addInput(old)
+            }
+            self.session.commitConfiguration()
+            self.applyMaxPhotoDimensions()
+            if let current = self.device { self.updateZoomOptions(for: current) }
+        }
+    }
+
     // MARK: - Zoom
 
+    private func updateZoomOptions(for dev: AVCaptureDevice) {
+        // Sur une caméra à ultra grand-angle, le facteur 1.0 correspond au 0,5×.
+        switch dev.deviceType {
+        case .builtInTripleCamera, .builtInDualWideCamera: zoomBase = 2
+        default: zoomBase = 1
+        }
+        var options: [Double] = []
+        if zoomBase == 2 { options.append(0.5) }
+        options.append(1)
+        let maxUI = Double(dev.maxAvailableVideoZoomFactor) / Double(zoomBase)
+        if dev.position == .back {
+            if maxUI >= 2 { options.append(2) }
+            if maxUI >= 5 { options.append(5) }
+        }
+        onMain { self.zoomOptions = options; self.currentZoom = 1 }
+        applyZoom(1)
+    }
+
     func setZoom(_ ui: Double) {
-        setMain { self.currentZoom = ui }
+        currentZoom = ui
         applyZoom(ui)
     }
 
@@ -143,44 +201,38 @@ final class CameraModel: NSObject, ObservableObject {
         queue.async { [weak self] in
             guard let self, let d = self.device else { return }
             let target = CGFloat(ui) * self.zoomBase
-            let clamped = max(d.minAvailableVideoZoomFactor,
-                              min(target, d.maxAvailableVideoZoomFactor))
             do {
                 try d.lockForConfiguration()
-                d.videoZoomFactor = clamped
+                d.videoZoomFactor = max(d.minAvailableVideoZoomFactor, min(target, d.maxAvailableVideoZoomFactor))
                 d.unlockForConfiguration()
             } catch { }
         }
     }
 
-    // MARK: - Mise au point
+    // MARK: - Réglages
 
-    func focus(at point: CGPoint) {
-        queue.async { [weak self] in
-            guard let self, let d = self.device else { return }
-            do {
-                try d.lockForConfiguration()
-                if d.isFocusPointOfInterestSupported {
-                    d.focusPointOfInterest = point
-                    if d.isFocusModeSupported(.autoFocus) { d.focusMode = .autoFocus }
-                }
-                if d.isExposurePointOfInterestSupported {
-                    d.exposurePointOfInterest = point
-                    if d.isExposureModeSupported(.autoExpose) { d.exposureMode = .autoExpose }
-                }
-                d.unlockForConfiguration()
-            } catch { }
-        }
-    }
+    func cycleTimer() { timerSeconds = timerSeconds == 0 ? 3 : (timerSeconds == 3 ? 10 : 0) }
+    func cycleBurst() { burst = burst == 1 ? 3 : (burst == 3 ? 5 : 1) }
 
     // MARK: - Déclenchement
 
-    func capture(delay: Int) {
-        guard isReady, !isBusy else { return }
-        guard delay > 0 else { fire(); return }
-
+    /// Appui sur le déclencheur. Un second appui pendant le décompte ou la rafale annule.
+    func capture() {
+        guard isReady else { return }
+        if isBusy {
+            cancelled = true
+            if timer != nil { finish() }
+            return
+        }
+        cancelled = false
         isBusy = true
-        countdown = delay
+        if timerSeconds > 0 { startCountdown(timerSeconds) } else { startBurst() }
+    }
+
+    private func startCountdown(_ seconds: Int) {
+        countdownTotal = seconds
+        countdown = seconds
+        tick()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
             guard let self else { t.invalidate(); return }
@@ -188,20 +240,44 @@ final class CameraModel: NSObject, ObservableObject {
             if self.countdown <= 0 {
                 t.invalidate()
                 self.timer = nil
-                self.fire()
+                self.countdownTotal = 0
+                self.startBurst()
+            } else {
+                self.tick()
             }
         }
     }
 
-    func cancelCountdown() {
+    private func tick() {
+        AudioServicesPlaySystemSound(1103)
+        Haptics.tap()
+    }
+
+    private func startBurst() {
+        remaining = burst
+        fireNext()
+    }
+
+    private func fireNext() {
+        guard !cancelled, remaining > 0 else { finish(); return }
+        remaining -= 1
+        burstIndex = burst > 1 ? burst - remaining : 0
+        Haptics.shutter()
+        fire()
+    }
+
+    private func finish() {
         timer?.invalidate()
         timer = nil
+        remaining = 0
+        cancelled = false
         countdown = 0
+        countdownTotal = 0
+        burstIndex = 0
         isBusy = false
     }
 
     private func fire() {
-        setMain { self.isBusy = true; self.countdown = 0 }
         queue.async { [weak self] in
             guard let self else { return }
             let settings: AVCapturePhotoSettings
@@ -217,73 +293,37 @@ final class CameraModel: NSObject, ObservableObject {
             } else if self.output.supportedFlashModes.contains(.off) {
                 settings.flashMode = .off
             }
-            // App verrouillée en portrait : l'angle est constant.
-            if let c = self.output.connection(with: .video), c.isVideoRotationAngleSupported(90) {
-                c.videoRotationAngle = 90
+            if let c = self.output.connection(with: .video) {
+                // App verrouillée en portrait : l'angle est constant.
+                if c.isVideoRotationAngleSupported(90) { c.videoRotationAngle = 90 }
+                // Caméra avant : la photo est enregistrée comme l'aperçu, en miroir.
+                if c.isVideoMirroringSupported {
+                    c.automaticallyAdjustsVideoMirroring = false
+                    c.isVideoMirrored = self.wantPosition == .front
+                }
             }
             self.output.capturePhoto(with: settings, delegate: self)
         }
     }
 
-    func cycleTimer() {
-        timerSeconds = timerSeconds == 0 ? 3 : (timerSeconds == 3 ? 10 : 0)
+    // MARK: - Utilitaires
+
+    private func report(_ message: String) {
+        onMain { self.errorText = message; self.finish() }
+    }
+
+    private func onMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread { block() } else { DispatchQueue.main.async(execute: block) }
     }
 
     // MARK: - Boutons de volume
 
     func enableVolumeShutter() {
-        volumeShutter.start { [weak self] in
-            guard let self else { return }
-            if self.countdown > 0 { self.cancelCountdown() }
-            else { self.capture(delay: self.timerSeconds) }
-        }
+        volumeShutter.start { [weak self] in self?.capture() }
     }
 
     func disableVolumeShutter() {
         volumeShutter.stop()
-    }
-
-    // MARK: - Photothèque
-
-    func saveCurrent(completion: ((Bool) -> Void)? = nil) {
-        guard let data = photoData else { completion?(false); return }
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else {
-                self.report("Autorise l'ajout aux photos dans Réglages → Pose.")
-                completion?(false)
-                return
-            }
-            PHPhotoLibrary.shared().performChanges({
-                let req = PHAssetCreationRequest.forAsset()
-                req.addResource(with: .photo, data: data, options: nil)
-            }, completionHandler: { ok, _ in
-                DispatchQueue.main.async {
-                    if ok { self.pulseSaved() }
-                    completion?(ok)
-                }
-            })
-        }
-    }
-
-    func discardReview() {
-        review = nil
-        photoData = nil
-        isBusy = false
-    }
-
-    private func pulseSaved() {
-        savedFlash = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.savedFlash = false }
-    }
-
-    // MARK: - Utilitaires
-
-    private func report(_ message: String) {
-        setMain { self.errorText = message; self.isBusy = false }
-    }
-
-    private func setMain(_ block: @escaping () -> Void) {
-        if Thread.isMainThread { block() } else { DispatchQueue.main.async(execute: block) }
     }
 }
 
@@ -294,27 +334,21 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
+        // Photo suivante de la rafale, pendant que celle-ci est recadrée en arrière-plan.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { self.fireNext() }
+
         if let error {
-            report("Échec de la capture : \(error.localizedDescription)")
+            onMain { self.onMessage?("Échec de la capture : \(error.localizedDescription)") }
             return
         }
         guard let data = photo.fileDataRepresentation() else {
-            report("Photo illisible.")
+            onMain { self.onMessage?("Photo illisible.") }
             return
         }
-        photoData = data
-        let image = UIImage(data: data)
-
-        DispatchQueue.main.async {
-            if self.autoSave {
-                self.saveCurrent { _ in
-                    self.photoData = nil
-                    self.isBusy = false
-                }
-            } else {
-                self.review = image
-                self.isBusy = false
-            }
+        let ratio = wantRatio
+        processing.async {
+            let result = PhotoProcessor.process(data, ratio: ratio)
+            DispatchQueue.main.async { self.onPhoto?(result) }
         }
     }
 }

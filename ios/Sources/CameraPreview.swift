@@ -1,8 +1,8 @@
 import SwiftUI
 import AVFoundation
 
-/// Aperçu caméra en `resizeAspect` : le cadre 3:4 affiché est exactement
-/// ce que le capteur enregistre, sans rognage surprise.
+/// Aperçu caméra en `resizeAspectFill` dans le cadre du format choisi.
+/// La photo est recadrée au centre avec le même rapport : ce qui est cadré est ce qui est gardé.
 struct CameraPreview: UIViewRepresentable {
 
     let session: AVCaptureSession
@@ -11,22 +11,28 @@ struct CameraPreview: UIViewRepresentable {
         let view = PreviewView()
         view.backgroundColor = .black
         view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspect
+        view.previewLayer.videoGravity = .resizeAspectFill
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        // La connexion n'existe qu'une fois les entrées ajoutées : on refixe
-        // l'angle à chaque passe tant qu'il n'est pas bon.
-        if let c = uiView.previewLayer.connection,
-           c.isVideoRotationAngleSupported(90),
-           c.videoRotationAngle != 90 {
-            c.videoRotationAngle = 90
-        }
+        uiView.fixRotation()
     }
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+
+        // La connexion n'existe qu'une fois les entrées ajoutées, et change avec la caméra.
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            fixRotation()
+        }
+
+        func fixRotation() {
+            if let c = previewLayer.connection, c.isVideoRotationAngleSupported(90), c.videoRotationAngle != 90 {
+                c.videoRotationAngle = 90
+            }
+        }
     }
 }
