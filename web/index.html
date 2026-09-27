@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Pose</title>
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pose">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="stage">
+  <video id="cam" playsinline autoplay muted></video>
+  <img id="ovimg" alt="">
+  <div id="grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div id="gesture"></div>
+  <div id="count"></div>
+  <div id="flash"></div>
+</div>
+
+<div id="topbar">
+  <button id="btnGrid"  class="ic" title="Grille">#</button>
+  <button id="btnMode"  class="ic" title="Contours">◑</button>
+  <button id="btnFlip"  class="ic" title="Miroir du guide">⇄</button>
+  <button id="btnReset" class="ic" title="Recentrer le guide">⤾</button>
+  <span class="spacer"></span>
+  <select id="lens" hidden></select>
+  <button id="btnHide" class="ic" title="Masquer l'interface">👁</button>
+</div>
+
+<div id="dock">
+  <div id="opacityRow">
+    <span class="lbl">Guide</span>
+    <input id="opacity" type="range" min="0" max="100" value="45">
+    <span id="opacityVal" class="lbl">45%</span>
+  </div>
+
+  <div id="strip">
+    <button id="btnAdd" class="thumb add" title="Ajouter des poses">+</button>
+  </div>
+
+  <div id="actions">
+    <button id="btnTimer" class="rnd">0s</button>
+    <button id="shutter" aria-label="Déclencher"></button>
+    <button id="btnSwap" class="rnd">⟳</button>
+  </div>
+</div>
+
+<input id="file" type="file" accept="image/*" multiple hidden>
+
+<div id="preview" hidden>
+  <img id="shot" alt="">
+  <div class="pvbar">
+    <button id="pvRetry" class="btn ghost">Refaire</button>
+    <button id="pvSave"  class="btn">Enregistrer</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="card">
+    <h1>Pose</h1>
+    <p id="msg">Un guide semi-transparent par-dessus la caméra, pour savoir quoi faire de tes bras.</p>
+    <button id="btnStart" class="btn">Activer la caméra</button>
+    <p class="fine">Tout reste sur ton téléphone. Aucun serveur, aucun envoi, aucun compte.</p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.ipa
+build/
+
+# Généré par XcodeGen / xcodebuild sur le runner
+ios/Pose.xcodeproj/
+ios/Generated/
+ios/build/

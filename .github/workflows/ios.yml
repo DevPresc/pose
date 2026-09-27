@@ -1,0 +1,63 @@
+name: Build IPA (non signée)
+
+# Aucun certificat, aucun mot de passe Apple ici : le CI produit une IPA NON SIGNÉE.
+# La signature se fait sur le PC, avec Sideloadly ou AltStore, à partir de l'Apple ID gratuit.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versions de l'environnement
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Installer XcodeGen
+        run: brew install xcodegen
+
+      - name: Générer le projet Xcode
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Compiler sans signature
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Pose.xcodeproj \
+            -scheme Pose \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Empaqueter en IPA
+        working-directory: ios/build/Build/Products/Release-iphoneos
+        run: |
+          mkdir -p Payload
+          cp -R Pose.app Payload/
+          zip -qry Pose.ipa Payload
+          ls -lh Pose.ipa
+
+      - name: Publier l'artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pose-ipa
+          path: ios/build/Build/Products/Release-iphoneos/Pose.ipa
+          if-no-files-found: error
+          retention-days: 90
