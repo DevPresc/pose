@@ -4,73 +4,178 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Pose</title>
+<meta name="description" content="Un guide de pose semi-transparent par-dessus la caméra. Tout reste sur ton téléphone.">
 <meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Pose">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-180.png">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div id="stage">
+<!-- Icônes : tracés Lucide (licence ISC), embarqués pour fonctionner hors-ligne. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></symbol>
+    <symbol id="i-level" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24"><path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/></symbol>
+    <symbol id="i-burst" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="M2 2l20 20"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></symbol>
+    <symbol id="i-switch" viewBox="0 0 24 24"><path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/><path d="M13 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5"/><circle cx="12" cy="12" r="3"/><path d="m18 22-3-3 3-3"/><path d="m6 2 3 3-3 3"/></symbol>
+    <symbol id="i-contour" viewBox="0 0 24 24"><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><path d="M5 17A12 12 0 0 1 17 5"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="m3 7 5 5-5 5V7"/><path d="m21 7-5 5 5 5V7"/><path d="M12 20v2M12 14v2M12 8v2M12 2v2"/></symbol>
+    <symbol id="i-ghost" viewBox="0 0 24 24"><path d="M9 10h.01M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></symbol>
+    <symbol id="i-image-plus" viewBox="0 0 24 24"><path d="M16 5h6M19 2v6"/><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/><circle cx="9" cy="9" r="2"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+    <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-square-plus" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8M12 8v8"/></symbol>
+  </defs>
+</svg>
+
+<main id="stage">
   <video id="cam" playsinline autoplay muted></video>
-  <img id="ovimg" alt="">
-  <div id="grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-  <div id="gesture"></div>
-  <div id="count"></div>
+  <div id="frame">
+    <img id="guide" alt="" draggable="false">
+    <div id="grid" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div id="level" aria-hidden="true"><span class="lv-l"></span><span class="lv-c" id="levelBar"></span><span class="lv-r"></span></div>
+    <div id="gesture"></div>
+    <button id="tip" class="tip" type="button"><svg class="i"><use href="#i-info"/></svg><span id="tipText"></span></button>
+    <div id="count" aria-live="polite"></div>
+    <div id="burstChip" class="chip-float"></div>
+  </div>
   <div id="flash"></div>
-</div>
+</main>
 
-<div id="topbar">
-  <button id="btnGrid"  class="ic" title="Grille">#</button>
-  <button id="btnMode"  class="ic" title="Contours">◑</button>
-  <button id="btnFlip"  class="ic" title="Miroir du guide">⇄</button>
-  <button id="btnReset" class="ic" title="Recentrer le guide">⤾</button>
-  <span class="spacer"></span>
-  <select id="lens" hidden></select>
-  <button id="btnHide" class="ic" title="Masquer l'interface">👁</button>
-</div>
+<header id="topbar">
+  <button class="ib" id="btnGrid" type="button" aria-label="Grille des tiers" aria-pressed="false"><svg class="i"><use href="#i-grid"/></svg></button>
+  <button class="ib" id="btnLevel" type="button" aria-label="Niveau" aria-pressed="false"><svg class="i"><use href="#i-level"/></svg></button>
+  <span class="sp"></span>
+  <button class="chip" id="btnRatio" type="button" aria-label="Format de la photo"><span id="ratioLabel">4:5</span></button>
+  <span class="sp"></span>
+  <button class="ib" id="btnTimer" type="button" aria-label="Retardateur" aria-pressed="false"><svg class="i"><use href="#i-timer"/></svg><b class="badge" id="timerBadge"></b></button>
+  <button class="ib" id="btnBurst" type="button" aria-label="Rafale" aria-pressed="false"><svg class="i"><use href="#i-burst"/></svg><b class="badge" id="burstBadge"></b></button>
+  <button class="ib" id="btnHide" type="button" aria-label="Masquer l'interface"><svg class="i"><use href="#i-eye-off"/></svg></button>
+</header>
 
-<div id="dock">
-  <div id="opacityRow">
-    <span class="lbl">Guide</span>
-    <input id="opacity" type="range" min="0" max="100" value="45">
-    <span id="opacityVal" class="lbl">45%</span>
+<button class="ib" id="btnShow" type="button" aria-label="Afficher l'interface"><svg class="i"><use href="#i-eye"/></svg></button>
+
+<footer id="dock">
+  <div id="lenses" class="lenses" hidden></div>
+
+  <button id="pill" class="pill" type="button" aria-label="Changer de pose">
+    <span id="pillInner" class="pill-inner">
+      <span class="pill-thumb"><img id="pillImg" alt=""></span>
+      <span id="pillName" class="pill-name">Choisir une pose</span>
+      <svg class="i pill-chev"><use href="#i-chevron"/></svg>
+    </span>
+  </button>
+
+  <div class="guide-row">
+    <label class="slider" aria-label="Opacité du guide">
+      <svg class="i"><use href="#i-ghost"/></svg>
+      <input id="opacity" type="range" min="10" max="100" value="55">
+    </label>
+    <span id="opacityVal" class="num">55 %</span>
+    <button class="ib sm" id="btnContour" type="button" aria-label="Contours seulement" aria-pressed="false"><svg class="i"><use href="#i-contour"/></svg></button>
+    <button class="ib sm" id="btnMirror" type="button" aria-label="Inverser le guide" aria-pressed="false"><svg class="i"><use href="#i-mirror"/></svg></button>
   </div>
 
-  <div id="strip">
-    <button id="btnAdd" class="thumb add" title="Ajouter des poses">+</button>
+  <div class="main-row">
+    <button id="thumb" class="thumb empty" type="button" aria-label="Pellicule">
+      <img id="thumbImg" alt="">
+      <svg class="i"><use href="#i-image"/></svg>
+      <b id="thumbBadge" class="tbadge" hidden></b>
+    </button>
+    <button id="shutter" type="button" aria-label="Déclencher">
+      <svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle id="ringC" cx="40" cy="40" r="37"/></svg>
+      <span class="core"></span>
+    </button>
+    <button class="ib lg" id="btnSwap" type="button" aria-label="Changer de caméra"><svg class="i"><use href="#i-switch"/></svg></button>
   </div>
-
-  <div id="actions">
-    <button id="btnTimer" class="rnd">0s</button>
-    <button id="shutter" aria-label="Déclencher"></button>
-    <button id="btnSwap" class="rnd">⟳</button>
-  </div>
-</div>
+</footer>
 
 <input id="file" type="file" accept="image/*" multiple hidden>
 
-<div id="preview" hidden>
-  <img id="shot" alt="">
-  <div class="pvbar">
-    <button id="pvRetry" class="btn ghost">Refaire</button>
-    <button id="pvSave"  class="btn">Enregistrer</button>
+<!-- Bibliothèque de poses -->
+<div id="backdrop" class="backdrop"></div>
+<section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div id="sheetHead" class="sheet-head">
+    <span class="grab"></span>
+    <div class="sheet-title">
+      <h2 id="sheetTitle">Poses</h2>
+      <button id="btnEdit" class="txt" type="button">Modifier</button>
+    </div>
+  </div>
+  <div id="sheetBody" class="sheet-body">
+    <h3>Pack de départ</h3>
+    <div id="packGrid" class="pgrid"></div>
+    <h3>Mes références</h3>
+    <div id="userGrid" class="pgrid"></div>
+    <p class="hint">Importe une capture Instagram ou Pinterest. Le mode <b>contours</b> ne garde que les lignes de la référence, sans son fond.</p>
+  </div>
+</section>
+
+<!-- Pellicule -->
+<section id="viewer" class="viewer" aria-hidden="true">
+  <div class="vbar">
+    <button class="ib" id="vClose" type="button" aria-label="Fermer"><svg class="i"><use href="#i-x"/></svg></button>
+    <div class="vmeta"><b id="vCount" class="num"></b><span id="vInfo" class="num"></span></div>
+    <span class="ib-spacer"></span>
+  </div>
+  <div id="vTrack" class="vtrack"></div>
+  <div class="vfoot">
+    <button class="ib lg" id="vDelete" type="button" aria-label="Supprimer"><svg class="i"><use href="#i-trash"/></svg></button>
+    <button class="ib lg" id="vShare" type="button" aria-label="Partager cette photo"><svg class="i"><use href="#i-share"/></svg></button>
+    <button class="btn" id="vSaveAll" type="button">Tout enregistrer</button>
+  </div>
+</section>
+
+<!-- Confirmation -->
+<div id="dlg" class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlgTitle">
+  <div class="dlg-card">
+    <h3 id="dlgTitle"></h3>
+    <p id="dlgText"></p>
+    <div class="dlg-actions">
+      <button class="btn ghost" id="dlgCancel" type="button">Annuler</button>
+      <button class="btn" id="dlgOk" type="button">OK</button>
+    </div>
   </div>
 </div>
 
-<div id="panel">
-  <div class="card">
-    <h1>Pose</h1>
-    <p id="msg">Un guide semi-transparent par-dessus la caméra, pour savoir quoi faire de tes bras.</p>
-    <button id="btnStart" class="btn">Activer la caméra</button>
-    <p class="fine">Tout reste sur ton téléphone. Aucun serveur, aucun envoi, aucun compte.</p>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- Accueil -->
+<div id="panel" class="panel">
+  <div class="panel-card">
+    <img class="st logo" style="--i:0" src="icons/icon-180.png" alt="">
+    <h1 class="st" style="--i:1">Pose</h1>
+    <p id="msg" class="st lead" style="--i:2">Un guide par-dessus la caméra, pour savoir enfin quoi faire de tes bras.</p>
+    <ul class="features">
+      <li class="st" style="--i:3"><span class="fi"><svg class="i"><use href="#i-person"/></svg></span><span><b>8 poses prêtes</b> ou tes propres références</span></li>
+      <li class="st" style="--i:4"><span class="fi"><svg class="i"><use href="#i-ghost"/></svg></span><span><b>Aligne-toi</b> sur le calque, puis déclenche</span></li>
+      <li class="st" style="--i:5"><span class="fi"><svg class="i"><use href="#i-shield"/></svg></span><span><b>Rien ne sort</b> du téléphone. Aucun serveur</span></li>
+    </ul>
+    <button id="btnStart" class="btn st" style="--i:6" type="button">Activer la caméra</button>
+    <p id="installHint" class="install st" style="--i:7" hidden>
+      <svg class="i"><use href="#i-share"/></svg>
+      <span>Partager puis <b>Sur l'écran d'accueil</b> pour l'avoir en plein écran.</span>
+    </p>
   </div>
 </div>
 
+<script src="poses.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
